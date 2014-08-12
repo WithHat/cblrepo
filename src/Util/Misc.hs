@@ -26,6 +26,7 @@ import Control.Monad
 import Control.Monad.Error
 import Control.Monad.Reader
 import Data.Either
+import Data.Maybe
 import Data.List
 import Data.Version
 import Distribution.Compiler
@@ -217,13 +218,27 @@ readCabal patchDir loc tmpDir = let
 -- {{{2 finalising
 finalizePkg ghcVersion db gpd = let
         n = ((\ (P.PackageName n) -> n ) . P.pkgName . package . packageDescription) gpd
-    in finalizePackageDescription
+    in addBuildTools n $ finalizePackageDescription
         [] -- no flags
         (checkAgainstDb db n)
         (Platform X86_64 buildOS) -- platform
         (CompilerId GHC ghcVersion)  -- compiler version
         [] -- no additional constraints
         gpd
+    where
+        -- Cabal doesn't check for tools, we do
+        addBuildTools n x@(Right (pd, _)) = let
+            libBt = if hasLibs pd
+                then buildTools $ libBuildInfo $ fromJust $ library pd
+                else []
+            exeBt = if hasExes pd
+                then concatMap (buildTools . buildInfo) $ executables pd
+                else []
+            bt = filter (not . checkAgainstDb db n) (libBt ++ exeBt)
+            in if null bt
+                then x
+                else Left bt
+        addBuildTools _ x = x
 
 checkAgainstDb db name dep = let
         dN = depName dep
